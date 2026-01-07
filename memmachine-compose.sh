@@ -13,15 +13,6 @@ BLUE='\033[0;34m'
 MAGENTA='\033[0;35m'
 NC='\033[0m' # No Color
 
-is_first_run=false
-
-# Use docker-compose or docker compose based on what's available
-if command -v docker-compose &> /dev/null; then
-    COMPOSE_CMD="docker-compose"
-else
-    COMPOSE_CMD="docker compose"
-fi
-
 ## Function to run a command with a timeout
 timeout() {
     local duration=$1
@@ -148,12 +139,6 @@ select_llm_model() {
             llm_model=$(echo "${llm_model:-llama3}" | tr -d '\n\r')
             print_success "Selected Ollama LLM model: $llm_model" >&2
             ;;
-        "OPENAI_COMPATIBLE")
-            print_prompt
-            read -p "Which OpenAI-compatible LLM model would you like to use? [qwen-flash]: " llm_model
-            llm_model=$(echo "${llm_model:-qwen-flash}" | tr -d '\n\r')
-            print_success "Selected OpenAI-compatible LLM model: $llm_model" >&2
-            ;;
         *)
             print_warning "Unknown provider: $provider. Using default LLM model." >&2
             llm_model="gpt-4o-mini"
@@ -186,12 +171,6 @@ select_embedding_model() {
             read -p "Which Ollama embedding model would you like to use? [nomic-embed-text]: " embedding_model
             embedding_model=$(echo "${embedding_model:-nomic-embed-text}" | tr -d '\n\r')
             print_success "Selected Ollama embedding model: $embedding_model" >&2
-            ;;
-        "OPENAI_COMPATIBLE")
-            print_prompt
-            read -p "Which OpenAI-compatible embedding model would you like to use? [text-embedding-v4]: " embedding_model
-            embedding_model=$(echo "${embedding_model:-text-embedding-v4}" | tr -d '\n\r')
-            print_success "Selected OpenAI-compatible embedding model: $embedding_model" >&2
             ;;
         *)
             print_warning "Unknown provider: $provider. Using default embedding model." >&2
@@ -230,14 +209,6 @@ generate_config_for_provider() {
         "OLLAMA")
             local model_name="ollama_model"
             local embedder_name="ollama_embedder"
-            local model_field="model"
-            local embedder_field="model"
-            ;;
-        "OPENAI_COMPATIBLE")
-            # OpenAI-compatible providers (e.g. self-hosted / compatible APIs)
-            # Uses sample config entries: openai_compatible_model / openai_compatible_embedder
-            local model_name="openai_compatible_model"
-            local embedder_name="openai_compatible_embedder"
             local model_field="model"
             local embedder_field="model"
             ;;
@@ -496,15 +467,15 @@ check_config_file() {
             MEMMACHINE_IMAGE="memmachine/memmachine:latest-cpu"
         fi
 
-        # Ask user for provider path (OpenAI, Bedrock, Ollama or OpenAI-compatible)
+        # Ask user for provider path (OpenAI, Bedrock, or Ollama)
         print_prompt
-        read -p "Which provider would you like to use? (OpenAI/Bedrock/Ollama/OpenAI-compatible) [OpenAI]: " provider_input
+        read -p "Which provider would you like to use? (OpenAI/Bedrock/Ollama) [OpenAI]: " provider_input
         # Clean the input and set default
-        provider_input=$(echo "${provider_input:-OpenAI}" | tr -d '\n\r' | tr '[:lower:]' '[:upper:]' | tr '-' '_')
+        provider_input=$(echo "${provider_input:-OpenAI}" | tr -d '\n\r' | tr '[:lower:]' '[:upper:]')
         local provider="$provider_input"
         
         # Validate provider selection
-        if [[ "$provider" != "OPENAI" && "$provider" != "BEDROCK" && "$provider" != "OLLAMA" && "$provider" != "OPENAI_COMPATIBLE" ]]; then
+        if [[ "$provider" != "OPENAI" && "$provider" != "BEDROCK" && "$provider" != "OLLAMA" ]]; then
             print_warning "Invalid provider selection: '$provider'. Defaulting to OpenAI."
             provider="OPENAI"
         fi
@@ -534,33 +505,25 @@ check_config_file() {
         fi
 
         set_config_defaults
-        is_first_run=true
     else
         print_success "configuration.yml file found"
     fi
 }
 
-select_openai_compatible_base_url() {
+select_openai_base_url() {
     local base_url=""
     local reply=""
-
-    if [ "$is_first_run" = true ]; then
+    
+    print_prompt
+    read -p "Would you like to configure a custom OpenAI Base URL? (Default: https://api.openai.com/v1) (y/N) " reply
+    if [[ $reply =~ ^[Yy]$ ]]; then
         print_prompt
-        read -p "Model base URL is not set. Would you like to configure a custom model base URL? (y/N) " reply
-        if [[ $reply =~ ^[Yy]$ ]]; then
-            print_prompt
-            read -p "OpenAI-compatible base URL [https://api.openai.com/v1]: " base_url
-            base_url=$(echo "${base_url:-https://api.openai.com/v1}" | tr -d '\n\r')
-            if [ -n "$base_url" ]; then
-                # Update base_url under openai_compatible_model / openai_compatible_embedder.
-                # Note: these entries exist in sample_configs/* and are included when provider=OPENAI_COMPATIBLE.
-                safe_sed_inplace "/openai_compatible_model:/,/base_url:/ s|base_url: .*|base_url: \"$base_url\"|" configuration.yml
-                safe_sed_inplace "/openai_compatible_embedder:/,/base_url:/ s|base_url: .*|base_url: \"$base_url\"|" configuration.yml
-                print_success "Set OpenAI-compatible base URL to $base_url"
-            fi
+        read -p "Enter your OpenAI Base URL: " base_url
+        if [ -n "$base_url" ]; then
+            safe_sed_inplace "/openai_model:/,/base_url:/ s|base_url: .*|base_url: \"$base_url\"|" configuration.yml
+            safe_sed_inplace "/openai_embedder:/,/base_url:/ s|base_url: .*|base_url: \"$base_url\"|" configuration.yml
+            print_success "Set OpenAI Base URL to $base_url"
         fi
-    else
-        print_success "Model base URL appears to be configured"
     fi
 }
 
@@ -598,27 +561,8 @@ set_provider_api_keys() {
             else
                 print_success "OpenAI API key appears to be configured"
             fi
-        fi
-
-        # Configure OpenAI-compatible provider (OPENAI_COMPATIBLE)
-        if [[ "$llm_model" == "openai_compatible_model" ]] || [[ "$embedder_model" == "openai_compatible_embedder" ]]; then
-            if grep -q "<YOUR_API_KEY>" configuration.yml; then
-                print_prompt
-                read -p "API key is not set. Would you like to set your API key for the OpenAI-compatible provider? (y/N) " reply
-                if [[ $reply =~ ^[Yy]$ ]]; then
-                    print_prompt
-                    read -sp "Enter your API key: " api_key
-                    echo
-                    safe_sed_inplace "s|OPENAI_API_KEY=.*|OPENAI_API_KEY=$api_key|" .env
-                    safe_sed_inplace "s|api_key: <YOUR_API_KEY>|api_key: $api_key|g" configuration.yml
-                    print_success "Set OPENAI_API_KEY in .env and configuration.yml"
-                fi
-            else
-                print_success "API key for OpenAI-compatible provider appears to be configured"
-            fi
-
-            # Base URL is configured only for OPENAI_COMPATIBLE.
-            select_openai_compatible_base_url
+            
+            select_openai_base_url
         fi
         
         # Configure Bedrock if selected
@@ -680,26 +624,6 @@ check_required_env() {
                 print_success "OPENAI_API_KEY is configured"
             fi
         fi
-
-        # Check OpenAI-compatible provider API key if configured
-        if [[ "$llm_model" == "openai_compatible_model" ]] || [[ "$embedder_model" == "openai_compatible_embedder" ]]; then
-            if [ -z "$OPENAI_API_KEY" ] || [ "$OPENAI_API_KEY" = "your_openai_api_key_here" ]; then
-                print_warning "OPENAI_API_KEY is not set or is using placeholder value"
-                print_warning "Please set your API key in the .env file for the OpenAI-compatible provider"
-                print_prompt
-                read -p "Press Enter to continue anyway (some features may not work)..."
-            else
-                print_success "OPENAI_API_KEY is configured (OpenAI-compatible provider)"
-            fi
-
-            if grep -q "openai_compatible_model:" configuration.yml && grep -q "base_url:" configuration.yml; then
-                print_success "OpenAI-compatible base URL appears to be configured"
-            else
-                print_warning "OpenAI-compatible base URL may be missing in configuration.yml"
-                print_prompt
-                read -p "Press Enter to continue anyway (some features may not work)..."
-            fi
-        fi
         
         # Check AWS credentials if Bedrock is configured
         if [[ "$llm_model" == "aws_model" ]] || [[ "$embedder_model" == "aws_embedder_id" ]]; then
@@ -755,36 +679,24 @@ start_services() {
 
     print_info "Pulling and starting MemMachine services..."
     
-    # Determine the target image
-    local target_image="${memmachine_image_tmp:-${MEMMACHINE_IMAGE:-memmachine/memmachine:latest}}"
-    print_info "Pulling latest images... (Target: $target_image)"
-    
-    # Try to pull; if it fails (e.g. local image), warn and proceed with PULL_POLICY=if_not_present
-    # We capture the output to suppress "manifest unknown" errors for local images
-    if pull_output=$(MEMMACHINE_IMAGE="${target_image}" $COMPOSE_CMD pull 2>&1); then
-        # Pull successful
-        echo "$pull_output"
-        export PULL_POLICY="always"
+    # Use docker-compose or docker compose based on what's available
+    if command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
     else
-        # Pull failed
-        if echo "$pull_output" | grep -q 'manifest unknown'; then
-            # This is the expected error for local-only images
-            print_warning "Image '${target_image}' not found in Docker Hub registry (manifest unknown). Assuming local image."
-        else
-            # Some other error (auth, network, etc) - show it!
-            print_error "Docker pull failed with unexpected error:"
-            echo "$pull_output"
-        fi
-        
-        export PULL_POLICY="if_not_present"
+        COMPOSE_CMD="docker compose"
     fi
 
+    # Unset the memmachine image temporarily; without this, 'docker compose pull' will attempt
+    # to pull ${MEMMACHINE_IMAGE} if it is set, which may not be a remote image.
+    ENV_MEMMACHINE_IMAGE=""
+    # Pull the latest images to ensure we are running the latest version
+    print_info "Pulling latest images..."
+    $COMPOSE_CMD pull
+    ENV_MEMMACHINE_IMAGE="${memmachine_image_tmp:-}"
+
     # Start services (override the image if specified in memmachine-compose.sh start <image>:<tag>)
-    if [ -n "${memmachine_image_tmp:-}" ]; then
-        MEMMACHINE_IMAGE="${memmachine_image_tmp}" $COMPOSE_CMD up -d
-    else
-        $COMPOSE_CMD up -d
-    fi
+    print_info "Starting containers..."
+    MEMMACHINE_IMAGE="${ENV_MEMMACHINE_IMAGE:-}" $COMPOSE_CMD up -d
     
     print_success "Services started successfully!"
 }
@@ -792,6 +704,13 @@ start_services() {
 # Wait for services to be healthy
 wait_for_health() {
     print_info "Waiting for services to be healthy..."
+    
+    # Use docker-compose or docker compose based on what's available
+    if command -v docker-compose &> /dev/null; then
+        COMPOSE_CMD="docker-compose"
+    else
+        COMPOSE_CMD="docker compose"
+    fi
     
     # Wait for services to be healthy
     $COMPOSE_CMD ps
@@ -809,7 +728,7 @@ wait_for_health() {
     
     # Wait for Neo4j
     print_info "Waiting for Neo4j to be ready..."
-    if timeout 120 bash -c "until docker exec memmachine-neo4j cypher-shell -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-neo4j_password} 'RETURN 1' > /dev/null 2>&1; do sleep 2; done"; then
+    if timeout 120 bash -c "until docker exec memmachine-neo4j cypher-shell -a bolt://localhost:7697 -u ${NEO4J_USER:-neo4j} -p ${NEO4J_PASSWORD:-neo4j_password} 'RETURN 1' > /dev/null 2>&1; do sleep 2; done"; then
         print_success "Neo4j is ready"
     else
         print_error "Neo4j failed to become ready in 120 seconds. Check container logs and configuration."
@@ -831,10 +750,10 @@ show_service_info() {
     print_success "🎉 MemMachine is now running!"
     echo ""
     echo "Service URLs:"
-    echo "  📊 MemMachine API Docs: http://localhost:${MEMORY_SERVER_PORT:-8080}/docs"
-    echo "  🗄️  Neo4j Browser: http://localhost:${NEO4J_HTTP_PORT:-7474}"
-    echo "  📈 Health Check: http://localhost:${MEMORY_SERVER_PORT:-8080}/api/v2/health"
-    echo "  📊 Metrics: http://localhost:${MEMORY_SERVER_PORT:-8080}/api/v2/metrics"
+    echo "  📊 MemMachine API: http://localhost:${MEMORY_SERVER_PORT:-8080}"
+    echo "  🗄️  Neo4j Browser: http://localhost:${NEO4J_HTTP_PORT:-7484}"
+    echo "  📈 Health Check: http://localhost:${MEMORY_SERVER_PORT:-8080}/health"
+    echo "  📊 Metrics: http://localhost:${MEMORY_SERVER_PORT:-8080}/metrics"
     echo ""
     echo "Database Access:"
     echo "  🐘 PostgreSQL: localhost:${POSTGRES_PORT:-5432} (user: ${POSTGRES_USER:-memmachine}, db: ${POSTGRES_DB:-memmachine})"
@@ -937,17 +856,29 @@ main() {
 case "${1:-}" in
     "stop")
         print_info "Stopping MemMachine services..."
-        $COMPOSE_CMD down
+        if command -v docker-compose &> /dev/null; then
+            docker-compose down
+        else
+            docker compose down
+        fi
         print_success "Services stopped"
         ;;
     "restart")
         print_info "Restarting MemMachine services..."
-        $COMPOSE_CMD restart
+        if command -v docker-compose &> /dev/null; then
+            docker-compose restart
+        else
+            docker compose restart
+        fi
         print_success "Services restarted"
         ;;
     "logs")
         print_info "Showing MemMachine logs..."
-        $COMPOSE_CMD logs -f
+        if command -v docker-compose &> /dev/null; then
+            docker-compose logs -f
+        else
+            docker compose logs -f
+        fi
         ;;
     "clean")
         print_warning "This will remove all data and volumes!"
@@ -956,7 +887,11 @@ case "${1:-}" in
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
             print_info "Cleaning up MemMachine services and data..."
-            $COMPOSE_CMD down -v
+            if command -v docker-compose &> /dev/null; then
+                docker-compose down -v
+            else
+                docker compose down -v
+            fi
             print_success "Cleanup completed"
         else
             print_info "Cleanup cancelled"
@@ -993,10 +928,6 @@ case "${1:-}" in
         echo "             Default LLM: llama3"
         echo "             Default embedding: nomic-embed-text"
         echo "             Requires: Base URL (default: http://host.docker.internal:11434/v1)"
-        echo "  OpenAI-compatible - Uses an OpenAI-compatible endpoint (custom base URL)"
-        echo "             Default LLM: qwen-flash"
-        echo "             Default embedding: text-embedding-v4"
-        echo "             Requires: API key (OPENAI_API_KEY) and base URL"
         echo ""
         echo "Features:"
         echo "  ProfileMemory - Intelligent user profiling and memory management"
