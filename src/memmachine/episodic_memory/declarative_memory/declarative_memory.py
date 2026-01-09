@@ -4,6 +4,7 @@ import asyncio
 import datetime
 import json
 import logging
+import time
 from collections.abc import Iterable
 from typing import cast
 from uuid import uuid4
@@ -153,8 +154,17 @@ class DeclarativeMemory:
             for derivative in episode_derivatives
         ]
 
+        # measure embedding generation time
+        embed_inputs = [derivative.content for derivative in derivatives]
+        embed_start = time.monotonic()
         derivative_embeddings = await self._embedder.ingest_embed(
-            [derivative.content for derivative in derivatives],
+            embed_inputs,
+        )
+        embed_end = time.monotonic()
+        logger.info(
+            "Generated %d derivative embeddings in %.3f s",
+            len(derivative_embeddings),
+            embed_end - embed_start,
         )
 
         derivative_nodes = [
@@ -209,13 +219,31 @@ class DeclarativeMemory:
                 nodes=derivative_nodes,
             ),
         ]
+        # measure Neo4j add_nodes time
+        nodes_start = time.monotonic()
         await asyncio.gather(*add_nodes_tasks)
+        nodes_end = time.monotonic()
+        total_nodes = len(episode_nodes) + len(derivative_nodes)
+        logger.info(
+            "Neo4j add_nodes: wrote %d nodes (episodes=%d, derivatives=%d) in %.3f s",
+            total_nodes,
+            len(episode_nodes),
+            len(derivative_nodes),
+            nodes_end - nodes_start,
+        )
 
+        edges_start = time.monotonic()
         await self._vector_graph_store.add_edges(
             relation=self._derived_from_relation,
             source_collection=self._derivative_collection,
             target_collection=self._episode_collection,
             edges=derivative_episode_edges,
+        )
+        edges_end = time.monotonic()
+        logger.info(
+            "Neo4j add_edges: wrote %d edges in %.3f s",
+            len(derivative_episode_edges),
+            edges_end - edges_start,
         )
 
     async def _derive_derivatives(

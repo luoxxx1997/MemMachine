@@ -180,6 +180,7 @@ class RerankerManager:
         return self._rerankers[name]
 
     async def _build_cross_encoder_reranker(self, name: str) -> Reranker:
+        import time
         from sentence_transformers import CrossEncoder
 
         from memmachine.common.reranker.cross_encoder_reranker import (
@@ -189,7 +190,24 @@ class RerankerManager:
 
         conf = self.conf.cross_encoder[name]
 
-        cross_encoder = CrossEncoder(conf.model_name)
+        # prefer GPU if available (torch.cuda.is_available()), otherwise CPU
+        try:
+            import torch
+
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        except Exception:
+            device = "cpu"
+
+        # instantiate CrossEncoder with explicit device and measure time
+        start_ts = time.perf_counter()
+        logger.info("Initializing CrossEncoder '%s' for reranker '%s' on device '%s'", conf.model_name, name, device)
+        try:
+            cross_encoder = CrossEncoder(conf.model_name, device=device)
+        except TypeError:
+            # older sentence-transformers versions expect device via torch; fall back
+            cross_encoder = CrossEncoder(conf.model_name)
+        elapsed = time.perf_counter() - start_ts
+        logger.info("Initialized CrossEncoder '%s' for reranker '%s' in %.2f seconds", conf.model_name, name, elapsed)
         self._rerankers[name] = CrossEncoderReranker(
             CrossEncoderRerankerParams(
                 cross_encoder=cross_encoder, max_input_length=conf.max_input_length

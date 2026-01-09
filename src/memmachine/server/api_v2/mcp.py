@@ -329,6 +329,12 @@ async def initialize_resource() -> MemMachine:
     """
     config = load_configuration()
     resource_mgr = ResourceManagerImpl(config)
+    # Eagerly build and validate configured resources (databases, embedders,
+    # language models, rerankers). This avoids expensive lazy initialization on
+    # the first request which can cause a long blocking delay (model loads,
+    # downloads, DB connection validation, etc.). Building here will lengthen
+    # startup but makes the first real request fast.
+    await resource_mgr.build()
     return MemMachine(config, resource_mgr)
 
 
