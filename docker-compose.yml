@@ -75,11 +75,11 @@ services:
     container_name: memmachine-app
     restart: unless-stopped
     ports:
-      - "${MEMORY_SERVER_PORT:-8080}:8080"
+      - "${MEMORY_SERVER_PORT:-8880}:8880"
     environment:
       # 重要：设置不通过代理的地址（内部网络）
-      no_proxy: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
-      NO_PROXY: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
+      no_proxy: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,ollama,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
+      NO_PROXY: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,ollama,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
       # Database configuration
       POSTGRES_HOST: ${POSTGRES_HOST:-postgres}
       POSTGRES_PORT: ${POSTGRES_PORT:-5432}
@@ -95,12 +95,13 @@ services:
 
       # Application configuration
       MEMORY_CONFIG: ${MEMORY_CONFIG:-/app/configuration.yml}
-      MCP_BASE_URL: ${MCP_BASE_URL:-http://memmachine:8080}
-      GATEWAY_URL: ${GATEWAY_URL:-http://localhost:8080}
+      MCP_BASE_URL: ${MCP_BASE_URL:-http://memmachine:8880}
+      GATEWAY_URL: ${GATEWAY_URL:-http://localhost:8880}
       FAST_MCP_LOG_LEVEL: ${FAST_MCP_LOG_LEVEL:-INFO}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
       HOST: 0.0.0.0
+      PORT: 8880
     volumes:
       - ./configuration.yml:/app/configuration.yml:ro,Z
       - memmachine_logs:/tmp/memory_logs
@@ -110,7 +111,7 @@ services:
       neo4j:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8080/api/v2/health"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8880/api/v2/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -143,6 +144,35 @@ services:
       APP_ENV: "prod"
       LOG_PATH: "prodLogs"
 
+# Ollama service for embedding and LLM models
+  ollama:
+    image: ollama/ollama:latest
+    container_name: memmachine-ollama
+    restart: unless-stopped
+    ports:
+      - "${OLLAMA_PORT:-11434}:11434"
+    environment:
+      OLLAMA_HOST: 0.0.0.0
+      OLLAMA_NUM_PARALLEL: 4
+      OLLAMA_MAX_LOADED_MODELS: 2
+      # 关闭代理避免下载模型时出现问题
+      HTTP_PROXY: ""
+      http_proxy: ""
+      HTTPS_PROXY: ""
+      https_proxy: ""
+      no_proxy: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
+      NO_PROXY: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
+    volumes:
+      - ollama_data:/root/.ollama
+    # 设置资源限制，根据需要调整
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+        reservations:
+          memory: 2G
+    networks:
+      - memmachine-network
 
 volumes:
   postgres_data:
@@ -158,6 +188,9 @@ volumes:
   memmachine_logs:
     driver: local
   memmachine_service_logs:
+    driver: local
+    #Ollama
+  ollama_data:
     driver: local
 
 networks:

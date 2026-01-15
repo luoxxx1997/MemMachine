@@ -737,7 +737,7 @@ wait_for_health() {
     
     # Wait for MemMachine
     print_info "Waiting for MemMachine to be ready..."
-    if timeout 120 bash -c "until curl -f http://localhost:${MEMORY_SERVER_PORT:-8080}/api/v2/health > /dev/null 2>&1; do sleep 5; done"; then
+    if timeout 120 bash -c "until curl -f http://localhost:${MEMORY_SERVER_PORT:-8880}/api/v2/health > /dev/null 2>&1; do sleep 5; done"; then
         print_success "MemMachine is ready"
     else
         print_error "MemMachine failed to become ready in 120 seconds. Check container logs and configuration."
@@ -750,10 +750,10 @@ show_service_info() {
     print_success "🎉 MemMachine is now running!"
     echo ""
     echo "Service URLs:"
-    echo "  📊 MemMachine API: http://localhost:${MEMORY_SERVER_PORT:-8080}"
+    echo "  📊 MemMachine API: http://localhost:${MEMORY_SERVER_PORT:-8880}"
     echo "  🗄️  Neo4j Browser: http://localhost:${NEO4J_HTTP_PORT:-7484}"
-    echo "  📈 Health Check: http://localhost:${MEMORY_SERVER_PORT:-8080}/health"
-    echo "  📊 Metrics: http://localhost:${MEMORY_SERVER_PORT:-8080}/metrics"
+    echo "  📈 Health Check: http://localhost:${MEMORY_SERVER_PORT:-8880}/health"
+    echo "  📊 Metrics: http://localhost:${MEMORY_SERVER_PORT:-8880}/metrics"
     echo ""
     echo "Database Access:"
     echo "  🐘 PostgreSQL: localhost:${POSTGRES_PORT:-5432} (user: ${POSTGRES_USER:-memmachine}, db: ${POSTGRES_DB:-memmachine})"

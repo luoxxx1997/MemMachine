@@ -77,5 +77,5 @@ RUN python -c "import nltk, sys; \
 # Set host to 0.0.0.0 to allow external access
 ENV HOST=0.0.0.0
 
-EXPOSE 8080
+EXPOSE 8880
 CMD ["sh", "-c", "memmachine-server"]

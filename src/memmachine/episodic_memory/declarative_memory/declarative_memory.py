@@ -110,7 +110,7 @@ class DeclarativeMemory:
         episodes: Iterable[Episode],
     ) -> None:
         """
-        Add episodes.
+        Add episodes synchronously (only store original episodes, defer derivative processing).
 
         Episodes are sorted by timestamp.
         Episodes with the same timestamp are sorted by UID.
@@ -123,6 +123,8 @@ class DeclarativeMemory:
             episodes,
             key=lambda episode: (episode.timestamp, episode.uid),
         )
+        
+        # Create and store original episode nodes synchronously
         episode_nodes = [
             Node(
                 uid=episode.uid,
@@ -142,109 +144,162 @@ class DeclarativeMemory:
             for episode in episodes
         ]
 
-        derive_derivatives_tasks = [
-            self._derive_derivatives(episode) for episode in episodes
-        ]
-
-        episodes_derivatives = await asyncio.gather(*derive_derivatives_tasks)
-
-        derivatives = [
-            derivative
-            for episode_derivatives in episodes_derivatives
-            for derivative in episode_derivatives
-        ]
-
-        # measure embedding generation time
-        embed_inputs = [derivative.content for derivative in derivatives]
-        embed_start = time.monotonic()
-        derivative_embeddings = await self._embedder.ingest_embed(
-            embed_inputs,
-        )
-        embed_end = time.monotonic()
-        logger.info(
-            "Generated %d derivative embeddings in %.3f s",
-            len(derivative_embeddings),
-            embed_end - embed_start,
-        )
-
-        derivative_nodes = [
-            Node(
-                uid=derivative.uid,
-                properties={
-                    "uid": derivative.uid,
-                    "timestamp": derivative.timestamp,
-                    "source": derivative.source,
-                    "content_type": derivative.content_type.value,
-                    "content": derivative.content,
-                }
-                | {
-                    mangle_filterable_property_key(key): value
-                    for key, value in derivative.filterable_properties.items()
-                },
-                embeddings={
-                    DeclarativeMemory._embedding_name(
-                        self._embedder.model_id,
-                        self._embedder.dimensions,
-                    ): (embedding, self._embedder.similarity_metric),
-                },
-            )
-            for derivative, embedding in zip(
-                derivatives,
-                derivative_embeddings,
-                strict=True,
-            )
-        ]
-
-        derivative_episode_edges = [
-            Edge(
-                uid=str(uuid4()),
-                source_uid=derivative.uid,
-                target_uid=episode.uid,
-            )
-            for episode, episode_derivatives in zip(
-                episodes,
-                episodes_derivatives,
-                strict=True,
-            )
-            for derivative in episode_derivatives
-        ]
-
-        add_nodes_tasks = [
-            self._vector_graph_store.add_nodes(
+        # Store the original episodes immediately
+        nodes_start = time.monotonic()
+        try:
+            await self._vector_graph_store.add_nodes(
                 collection=self._episode_collection,
                 nodes=episode_nodes,
-            ),
-            self._vector_graph_store.add_nodes(
-                collection=self._derivative_collection,
-                nodes=derivative_nodes,
-            ),
-        ]
-        # measure Neo4j add_nodes time
-        nodes_start = time.monotonic()
-        await asyncio.gather(*add_nodes_tasks)
-        nodes_end = time.monotonic()
-        total_nodes = len(episode_nodes) + len(derivative_nodes)
-        logger.info(
-            "Neo4j add_nodes: wrote %d nodes (episodes=%d, derivatives=%d) in %.3f s",
-            total_nodes,
-            len(episode_nodes),
-            len(derivative_nodes),
-            nodes_end - nodes_start,
+            )
+        finally:
+            nodes_end = time.monotonic()
+            logger.info(
+                "VectorGraphStore add_nodes: wrote %d episode nodes in %.3f s",
+                len(episode_nodes),
+                nodes_end - nodes_start,
+            )
+
+        # Trigger asynchronous processing of derivatives in the background
+        task = asyncio.create_task(self._process_derivatives_async(episodes))
+        logger.debug(
+            "Scheduled background derivative processing task %s for %d episodes",
+            getattr(task, "get_name", lambda: repr(task))(),
+            len(episodes),
         )
 
-        edges_start = time.monotonic()
-        await self._vector_graph_store.add_edges(
-            relation=self._derived_from_relation,
-            source_collection=self._derivative_collection,
-            target_collection=self._episode_collection,
-            edges=derivative_episode_edges,
-        )
-        edges_end = time.monotonic()
-        logger.info(
-            "Neo4j add_edges: wrote %d edges in %.3f s",
-            len(derivative_episode_edges),
-            edges_end - edges_start,
-        )
+    async def _process_derivatives_async(self, episodes: Iterable[Episode]) -> None:
+        """
+        Process derivatives asynchronously in the background.
+        
+        Args:
+            episodes (Iterable[Episode]): The episodes to process for derivatives.
+        """
+        try:
+            derive_derivatives_tasks = [
+                self._derive_derivatives(episode) for episode in episodes
+            ]
+
+            episodes_derivatives = await asyncio.gather(*derive_derivatives_tasks)
+
+            derivatives = [
+                derivative
+                for episode_derivatives in episodes_derivatives
+                for derivative in episode_derivatives
+            ]
+
+            if not derivatives:
+                return  # Nothing to process
+
+            # measure embedding generation time
+            embed_inputs = [derivative.content for derivative in derivatives]
+
+            # Deduplicate identical texts to avoid repeated embedding calls.
+            text_to_indices: dict[str, list[int]] = {}
+            unique_texts: list[str] = []
+            for idx, txt in enumerate(embed_inputs):
+                if txt not in text_to_indices:
+                    text_to_indices[txt] = [idx]
+                    unique_texts.append(txt)
+                else:
+                    text_to_indices[txt].append(idx)
+
+            embed_start = time.monotonic()
+            logger.info(f"embed start at {embed_start}; unique_texts={len(unique_texts)} total_inputs={len(embed_inputs)}")
+
+            unique_embeddings = await self._embedder.ingest_embed(
+                unique_texts,
+            )
+
+            # Map unique embeddings back to the original order, preserving duplicates
+            # allow None initially while we populate embeddings
+            from typing import Optional
+            derivative_embeddings: list[Optional[list[float]]] = [None] * len(embed_inputs)
+            for unique_txt, emb in zip(unique_texts, unique_embeddings):
+                for i in text_to_indices[unique_txt]:
+                    derivative_embeddings[i] = emb
+
+            embed_end = time.monotonic()
+            logger.info(f"embed end at {embed_end}")
+            logger.info(
+                "Generated %d derivative embeddings in %.3f s",
+                len(derivative_embeddings),
+                embed_end - embed_start,
+            )
+
+            derivative_nodes = [
+                Node(
+                    uid=derivative.uid,
+                    properties={
+                        "uid": derivative.uid,
+                        "timestamp": derivative.timestamp,
+                        "source": derivative.source,
+                        "content_type": derivative.content_type.value,
+                        "content": derivative.content,
+                    }
+                    | {
+                        mangle_filterable_property_key(key): value
+                        for key, value in derivative.filterable_properties.items()
+                    },
+                    embeddings={
+                        DeclarativeMemory._embedding_name(
+                            self._embedder.model_id,
+                            self._embedder.dimensions,
+                        ): (embedding, self._embedder.similarity_metric),
+                    },
+                )
+                for derivative, embedding in zip(
+                    derivatives,
+                    derivative_embeddings,
+                    strict=True,
+                )
+            ]
+
+            derivative_episode_edges = [
+                Edge(
+                    uid=str(uuid4()),
+                    source_uid=derivative.uid,
+                    target_uid=episode.uid,
+                )
+                for episode, episode_derivatives in zip(
+                    episodes,
+                    episodes_derivatives,
+                    strict=True,
+                )
+                for derivative in episode_derivatives
+            ]
+
+            add_nodes_tasks = [
+                self._vector_graph_store.add_nodes(
+                    collection=self._derivative_collection,
+                    nodes=derivative_nodes,
+                ),
+            ]
+            # measure Neo4j add_nodes time
+            nodes_start = time.monotonic()
+            await asyncio.gather(*add_nodes_tasks)
+            nodes_end = time.monotonic()
+            total_nodes = len(derivative_nodes)
+            logger.info(
+                "Neo4j add_nodes: wrote %d derivative nodes in %.3f s",
+                total_nodes,
+                nodes_end - nodes_start,
+            )
+
+            edges_start = time.monotonic()
+            await self._vector_graph_store.add_edges(
+                relation=self._derived_from_relation,
+                source_collection=self._derivative_collection,
+                target_collection=self._episode_collection,
+                edges=derivative_episode_edges,
+            )
+            edges_end = time.monotonic()
+            logger.info(
+                "Neo4j add_edges: wrote %d edges in %.3f s",
+                len(derivative_episode_edges),
+                edges_end - edges_start,
+            )
+        except Exception as e:
+            logger.error(f"Error in async derivative processing: {e}", exc_info=True)
 
     async def _derive_derivatives(
         self,
