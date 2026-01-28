@@ -105,6 +105,13 @@ services:
     volumes:
       - ./configuration.yml:/app/configuration.yml:ro,Z
       - memmachine_logs:/tmp/memory_logs
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,7 +122,7 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 600s
     networks:
       - memmachine-network
       
