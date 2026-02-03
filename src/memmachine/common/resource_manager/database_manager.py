@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from asyncio import Lock
 from typing import Self
 
@@ -204,22 +205,43 @@ class DatabaseManager:
 
     @staticmethod
     async def validate_sql_engine(name: str, engine: AsyncEngine) -> None:
-        """Validate connectivity for a single SQL engine."""
-        try:
-            logger.info("Validating SQL engine '%s'", name)
-            async with engine.connect() as conn:
-                result = await conn.execute(text("SELECT 1;"))
-                row = result.fetchone()
-            logger.info("SQL engine '%s' validated successfully", name)
-        except Exception as e:
-            raise SQLConfigurationError(
-                f"SQL config '{name}' failed verification: {e}",
-            ) from e
+        """Validate connectivity for a single SQL engine.
 
-        if not row or row[0] != 1:
-            raise SQLConfigurationError(
-                f"Verification failed for SQL config '{name}'",
-            )
+        On some deployments (especially fresh containers), the DB service may be
+        reachable but not yet ready to accept connections. We retry a few times
+        to avoid failing the whole app startup on transient timeouts.
+        """
+        retries = int(os.getenv("MEMMACHINE_SQL_VALIDATE_RETRIES", "10") or 10)
+        base_sleep = float(os.getenv("MEMMACHINE_SQL_VALIDATE_BACKOFF_SECONDS", "1") or 1)
+
+        last_err: Exception | None = None
+        for attempt in range(1, retries + 1):
+            try:
+                logger.info("Validating SQL engine '%s' (attempt %s/%s)", name, attempt, retries)
+                async with engine.connect() as conn:
+                    result = await conn.execute(text("SELECT 1;"))
+                    row = result.fetchone()
+                if not row or row[0] != 1:
+                    raise SQLConfigurationError(
+                        f"Verification failed for SQL config '{name}'"
+                    )
+                logger.info("SQL engine '%s' validated successfully", name)
+                return
+            except Exception as e:
+                last_err = e
+                logger.warning(
+                    "SQL engine '%s' validation attempt %s/%s failed: %s",
+                    name,
+                    attempt,
+                    retries,
+                    e,
+                )
+                if attempt < retries:
+                    await asyncio.sleep(base_sleep * attempt)
+
+        raise SQLConfigurationError(
+            f"SQL config '{name}' failed verification after {retries} attempts: {last_err}"
+        ) from last_err
 
     async def _validate_sql_engines(self) -> None:
         """Validate connectivity for each SQL engine."""
