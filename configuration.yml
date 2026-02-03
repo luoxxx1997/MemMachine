@@ -54,31 +54,31 @@ resources:
     openai_embedder:
       provider: openai
       config:
-        model: "qwen3-embedding-0.6b"
+        model: "Qwen3-Embedding-0.6B"
         api_key: gpustack_bae0ff7c11bc5e9b_0c1b0318cbf420b3c9e039c1516805e5
-        base_url: "http://192.168.1.86:8899/v1"
+        base_url: "http://192.168.1.85:8088/v1"
         dimensions: 1024
     ollama_embedder:
       provider: openai
       config:
-        model: "qwen3-embedding-0.6b"
+        model: "Qwen3-Embedding-0.6B"
         api_key: gpustack_bae0ff7c11bc5e9b_0c1b0318cbf420b3c9e039c1516805e5
-        base_url: "http://192.168.1.86:8899/v1"
+        base_url: "http://192.168.1.85:8088/v1"
         dimensions: 1024
 
   language_models:
     openai_model:
       provider: openai-chat-completions
       config:
-        model: "qwen3-8b"
+        model: "Qwen3-4B"
         api_key: gpustack_bae0ff7c11bc5e9b_0c1b0318cbf420b3c9e039c1516805e5
-        base_url: "http://192.168.1.86:8899/v1"
+        base_url: "http://192.168.1.85:8088/v1"
     ollama_model:
       provider: openai-chat-completions
       config:
-        model: "qwen3-8b"
+        model: "Qwen3-4B"
         api_key: gpustack_bae0ff7c11bc5e9b_0c1b0318cbf420b3c9e039c1516805e5
-        base_url: "http://192.168.1.86:8899/v1"
+        base_url: "http://192.168.1.85:8088/v1"
 
   rerankers:
     my_reranker_id:
