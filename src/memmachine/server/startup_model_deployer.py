@@ -58,9 +58,39 @@ async def maybe_deploy_init_model() -> None:
     enabled = _env_bool("STARTUP_MODEL_DEPLOY_ENABLED", default=True)
     fail_hard = _env_bool("FAIL_ON_STARTUP_MODEL_DEPLOY", default=False)
 
+    logger.info(
+        "Startup model deploy step entered: enabled=%s fail_hard=%s",
+        enabled,
+        fail_hard,
+    )
+
     if not enabled:
         logger.info("Startup model deploy disabled (STARTUP_MODEL_DEPLOY_ENABLED=false)")
         return
+
+    # ---- entry: deploy embedding + llm (if configured) ----
+    targets: list[tuple[str, str, str]] = []
+
+    emb_name = _env("INIT_EMBEDDING_MODEL")
+    emb_ver = _env("INIT_EMBEDDING_MODEL_VERSION")
+    if emb_name and emb_ver:
+        targets.append(("embedding", emb_name, emb_ver))
+
+    llm_name = _env("INIT_LLM_MODEL")
+    llm_ver = _env("INIT_LLM_MODEL_VERSION")
+    if llm_name and llm_ver:
+        targets.append(("llm", llm_name, llm_ver))
+
+    if not targets:
+        logger.info(
+            "Startup model deploy skipped (no INIT_EMBEDDING_MODEL/INIT_LLM_MODEL configured)"
+        )
+        return
+
+    logger.info(
+        "Startup model deploy targets: %s",
+        ", ".join([f"{k}:{n}:{v}" for k, n, v in targets]),
+    )
 
     async def _deploy_one(*, model_name: str, model_version: str) -> None:
         registry_base = _env("MODEL_SYSTEM_BASE_URL")
@@ -92,6 +122,15 @@ async def maybe_deploy_init_model() -> None:
             username=gpustack_user,
             password=gpustack_pass,
             deploy_path=gpustack_deploy,
+        )
+
+        logger.info(
+            "Startup model deploy config: registry_base=%s list_path=%s download_path_tpl=%s gpustack_base_url=%s deploy_path=%s",
+            registry_base,
+            list_path,
+            download_path_tpl,
+            gpustack_base_url,
+            gpustack_deploy,
         )
 
         retries = int(_env("STARTUP_MODEL_DEPLOY_RETRIES", "3") or 3)
@@ -196,25 +235,6 @@ async def maybe_deploy_init_model() -> None:
             ) from last_err
         finally:
             await client.aclose()
-
-    # ---- entry: deploy embedding + llm (if configured) ----
-    targets: list[tuple[str, str, str]] = []
-
-    emb_name = _env("INIT_EMBEDDING_MODEL")
-    emb_ver = _env("INIT_EMBEDDING_MODEL_VERSION")
-    if emb_name and emb_ver:
-        targets.append(("embedding", emb_name, emb_ver))
-
-    llm_name = _env("INIT_LLM_MODEL")
-    llm_ver = _env("INIT_LLM_MODEL_VERSION")
-    if llm_name and llm_ver:
-        targets.append(("llm", llm_name, llm_ver))
-
-    if not targets:
-        logger.info(
-            "Startup model deploy skipped (no INIT_EMBEDDING_MODEL/INIT_LLM_MODEL configured)"
-        )
-        return
 
     for kind, name, ver in targets:
         try:

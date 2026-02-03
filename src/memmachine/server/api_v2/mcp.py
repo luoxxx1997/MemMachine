@@ -327,14 +327,16 @@ async def initialize_resource() -> MemMachine:
         and SessionIdManager instances.
 
     """
+    logger.info("initialize_resource(): starting startup model deploy step")
     # Optionally deploy an initial model into GPUStack before heavy resource build.
     # This is best-effort by default and controlled via env vars.
     try:
         from ..startup_model_deployer import maybe_deploy_init_model
 
         await maybe_deploy_init_model()
-    except Exception:
-        logger.exception("Startup model deploy step failed")
+        logger.info("initialize_resource(): startup model deploy step done")
+    except Exception as e:
+        logger.exception("Startup model deploy step failed: %s", e)
 
     config = load_configuration()
     resource_mgr = ResourceManagerImpl(config)
