@@ -66,12 +66,15 @@ services:
 
   # MemMachine application
   memmachine:
-#    image: ${MEMMACHINE_IMAGE:-memmachine/memmachine}
-    build:
-      context: .
-      dockerfile: Dockerfile
-      args:
-        GPU: "true"
+    image: memmachine-memmachine:latest
+    # 如果要改为本地构建，使用下面 build（确保缩进正确）：
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+    #   args:
+    #     GPU: "true"
+    # 如果你想强制只用本地镜像、不去 pull，可在支持的 compose 版本下加：
+    # pull_policy: never
     container_name: memmachine-app
     restart: unless-stopped
     ports:
@@ -160,24 +163,25 @@ services:
       - memmachine-network
       
   memmachine_service:
-    build:
-      context: ../MemMachineService
-      args:
-        http_proxy: ""
-        https_proxy: ""
-        HTTP_PROXY: ""
-        HTTPS_PROXY: ""
+    image: memmachine-memmachine_service:latest
+    # build:
+    #   context: ../MemMachineService
+    #   args:
+    #     http_proxy: ""
+    #     https_proxy: ""
+    #     HTTP_PROXY: ""
+    #     HTTPS_PROXY: ""
     container_name: memmachine-service
     depends_on:
       memmachine:
         condition: service_healthy
     restart: unless-stopped
     ports:
-        - "8851:8851"  
+      - "8851:8851"
     volumes:
-        - memmachine_service_logs:/app/src/prodLogs  
+      - memmachine_service_logs:/app/src/prodLogs
     networks:
-        - memmachine-network
+      - memmachine-network
     environment:
       no_proxy: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
       NO_PROXY: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
