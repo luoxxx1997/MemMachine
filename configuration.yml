@@ -95,4 +95,4 @@ resources:
     ce_ranker_id:
       provider: "cross-encoder"
       config:
-        model_name: "cross-encoder/qnli-electra-base"
+        model_name: "/models/cross-encoder/qnli-electra-base"

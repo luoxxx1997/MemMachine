@@ -123,9 +123,21 @@ services:
       GPUSTACK_PASSWORD: ${GPUSTACK_PASSWORD:-}
       GPUSTACK_DEPLOY_URL: ${GPUSTACK_DEPLOY_URL:-/v2/models}
 
+      # Hugging Face / Transformers (use mirror + cache)
+      HF_ENDPOINT: ${HF_ENDPOINT:-https://hf-mirror.com}
+      HF_HOME: ${HF_HOME:-/tmp/huggingface}
+      TRANSFORMERS_CACHE: ${TRANSFORMERS_CACHE:-/tmp/huggingface/transformers}
+      HF_HUB_CACHE: ${HF_HUB_CACHE:-/tmp/huggingface/hub}
+      SENTENCE_TRANSFORMERS_HOME: ${SENTENCE_TRANSFORMERS_HOME:-/tmp/sentence_transformers}
+      # Optional offline mode (set to 1 after pre-downloading models)
+      TRANSFORMERS_OFFLINE: ${TRANSFORMERS_OFFLINE:-0}
+      HF_HUB_OFFLINE: ${HF_HUB_OFFLINE:-0}
+
     volumes:
       - ./configuration.yml:/app/configuration.yml:ro,Z
       - memmachine_logs:/tmp/memory_logs
+      # Local HF/SentenceTransformers models (reranker)
+      - ${LOCAL_MODELS_DIR:-./models}:/models:ro
     deploy:
       resources:
         reservations:
@@ -172,35 +184,7 @@ services:
       APP_ENV: "prod"
       LOG_PATH: "prodLogs"
 
-# Ollama service for embedding and LLM models
-#  ollama:
-#    image: ollama/ollama:latest
-#    container_name: memmachine-ollama
-#    restart: unless-stopped
-#    ports:
-#      - "${OLLAMA_PORT:-11434}:11434"
-#    environment:
-#      OLLAMA_HOST: 0.0.0.0
-#      OLLAMA_NUM_PARALLEL: 4
-#      OLLAMA_MAX_LOADED_MODELS: 2
-#      # 关闭代理避免下载模型时出现问题
-#      HTTP_PROXY: ""
-#      http_proxy: ""
-#      HTTPS_PROXY: ""
-#      https_proxy: ""
-#      no_proxy: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
-#      NO_PROXY: "localhost,127.0.0.1,0.0.0.0,postgres,neo4j,memmachine,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.ndsl"
-#    volumes:
-#      - ollama_data:/root/.ollama
-#    # 设置资源限制，根据需要调整
-#    deploy:
-#      resources:
-#        limits:
-#          memory: 8G
-#        reservations:
-#          memory: 2G
-#    networks:
-#      - memmachine-network
+
 
 volumes:
   postgres_data:
@@ -217,9 +201,6 @@ volumes:
     driver: local
   memmachine_service_logs:
     driver: local
-    #Ollama
-#  ollama_data:
-#    driver: local
 
 networks:
   memmachine-network:
