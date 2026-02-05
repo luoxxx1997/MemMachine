@@ -327,8 +327,25 @@ async def initialize_resource() -> MemMachine:
         and SessionIdManager instances.
 
     """
+    logger.info("initialize_resource(): starting startup model deploy step")
+    # Optionally deploy an initial model into GPUStack before heavy resource build.
+    # This is best-effort by default and controlled via env vars.
+    try:
+        from ..startup_model_deployer import maybe_deploy_init_model
+
+        await maybe_deploy_init_model()
+        logger.info("initialize_resource(): startup model deploy step done")
+    except Exception as e:
+        logger.exception("Startup model deploy step failed: %s", e)
+
     config = load_configuration()
     resource_mgr = ResourceManagerImpl(config)
+    # Eagerly build and validate configured resources (databases, embedders,
+    # language models, rerankers). This avoids expensive lazy initialization on
+    # the first request which can cause a long blocking delay (model loads,
+    # downloads, DB connection validation, etc.). Building here will lengthen
+    # startup but makes the first real request fast.
+    await resource_mgr.build()
     return MemMachine(config, resource_mgr)
 
 

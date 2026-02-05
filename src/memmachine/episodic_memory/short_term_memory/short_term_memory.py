@@ -207,9 +207,20 @@ class ShortTermMemory:
         # Reset the count so it will only count new episodes
         self._current_episode_count = 0
         # if previous summary task is still running, wait for it
-        if self._summary_task is not None:
-            await self._summary_task
-        self._summary_task = asyncio.create_task(self._create_summary(result))
+        # Avoid blocking add_episodes by awaiting an in-progress summary task.
+        # If a summary task is already running, skip launching a new one to avoid piling up.
+        try:
+            if getattr(self, "_summary_task", None) is not None and not self._summary_task.done():
+                logger.info(
+                    "Previous summary task still running for session %s; skipping new summary scheduling",
+                    self._session_key,
+                )
+            else:
+                self._summary_task = asyncio.create_task(self._create_summary(result))
+        except Exception as e:
+            logger.exception("Failed to schedule summary task: %s", e)
+
+        return
 
     async def close(self) -> None:
         """

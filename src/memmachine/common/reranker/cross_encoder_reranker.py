@@ -22,6 +22,11 @@ class CrossEncoderRerankerParams(BaseModel):
         description="Maximum input length for the model (in Unicode code points)",
         gt=0,
     )
+    batch_size: int | None = Field(
+        default=32,
+        description="Batch size to use when calling cross-encoder predict",
+        gt=0,
+    )
 
 
 class CrossEncoderReranker(Reranker):
@@ -51,14 +56,32 @@ class CrossEncoderReranker(Reranker):
             for chunk in candidate_chunks
         ]
 
-        chunk_scores = [
-            float(score)
-            for score in await asyncio.to_thread(
-                self._cross_encoder.predict,
-                [(query, chunk) for chunk in chunks],
-                show_progress_bar=False,
+        # predict in a thread with batching to improve throughput
+        predict_fn = self._cross_encoder.predict
+        inputs = [(query, chunk) for chunk in chunks]
+        batch_size = (
+            self._max_input_length
+            if isinstance(self._max_input_length, int) and self._max_input_length > 0
+            else 32
+        )
+        # if batch size provided in params, prefer that
+        try:
+            batch_size = (
+                int(self._batch_size)
+                if hasattr(self, "_batch_size") and getattr(self, "_batch_size")
+                else batch_size
             )
-        ]
+        except Exception:
+            pass
+
+        results = []
+        for i in range(0, len(inputs), batch_size):
+            batch = inputs[i : i + batch_size]
+            batch_scores = await asyncio.to_thread(
+                predict_fn, batch, show_progress_bar=False
+            )
+            results.extend([float(s) for s in batch_scores])
+        chunk_scores = results
 
         chunked_candidate_scores = unflatten_like(chunk_scores, chunked_candidates)
 

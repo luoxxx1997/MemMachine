@@ -446,6 +446,13 @@ class Neo4jVectorGraphStore(VectorGraphStore):
             nodes=query_nodes,
         )
 
+        # log timing metrics for this driver call
+        logger.debug(
+            "Called Neo4j execute_query for add_nodes: collection=%s count=%d",
+            sanitized_collection,
+            len(query_nodes),
+        )
+
         self._collection_node_counts[collection] += len(query_nodes)
 
         if (
@@ -565,6 +572,12 @@ class Neo4jVectorGraphStore(VectorGraphStore):
             "    (target)\n"
             "SET r += edge.properties",
             edges=query_edges,
+        )
+
+        logger.debug(
+            "Called Neo4j execute_query for add_edges: relation=%s count=%d",
+            sanitized_relation,
+            len(query_edges),
         )
 
         self._relation_edge_counts[relation] += len(query_edges)

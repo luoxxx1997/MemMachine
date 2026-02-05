@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import time
 from asyncio import Task
 from collections.abc import Coroutine
 from typing import Any, Final, Protocol, cast
@@ -261,9 +262,17 @@ class MemMachine:
         target_memories: list[MemoryType] = ALL_MEMORY_TYPES,
     ) -> list[EpisodeIdT]:
         episode_storage = await self._resources.get_episode_storage()
+        # Measure time spent persisting episodic entries to the episode store.
+        storage_start = time.monotonic()
         episodes = await episode_storage.add_episodes(
             session_data.session_key,
             episode_entries,
+        )
+        storage_end = time.monotonic()
+        logger.info(
+            "EpisodeStore add_episodes: wrote %d episodes in %.3f s",
+            len(episodes),
+            storage_end - storage_start,
         )
         episode_ids = [e.uid for e in episodes]
 
