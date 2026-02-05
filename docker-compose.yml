@@ -192,19 +192,12 @@ services:
 
 volumes:
   postgres_data:
-    driver: local
   neo4j_data:
-    driver: local
   neo4j_logs:
-    driver: local
   neo4j_import:
-    driver: local
   neo4j_plugins:
-    driver: local
   memmachine_logs:
-    driver: local
   memmachine_service_logs:
-    driver: local
 
 networks:
   memmachine-network:
